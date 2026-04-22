@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 1,2,3,4 * * *"
   workflow_dispatch:
+    inputs:
+      force_push:
+        description: "Force send even if the latest item was already pushed"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -24,7 +30,12 @@ jobs:
       - name: Push latest AI daily to DingTalk
         env:
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
-        run: node src/index.js
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_push }}" = "true" ]; then
+            export FORCE_PUSH=1
+            echo "FORCE_PUSH enabled for manual dispatch."
+          fi
+          node src/index.js
 
       - name: Commit updated state
         run: |
