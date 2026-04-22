@@ -134,25 +134,97 @@ export function shouldSkipPush(item, state) {
   return Boolean(state?.lastSentId && state.lastSentId === item.id);
 }
 
-export function buildDingtalkPayload(item) {
-  const publishedAt = new Date(item.pubDate);
-  const publishedText = Number.isNaN(publishedAt.getTime())
-    ? item.pubDate
-    : publishedAt.toLocaleString("zh-CN", {
-        hour12: false,
-        timeZone: "Asia/Shanghai",
-      });
+export function extractIssueDate(item) {
+  const titleDate = item.title.match(/^(\d{4}-\d{2}-\d{2})/);
 
-  const summary = item.description.length > 240
-    ? `${item.description.slice(0, 240)}...`
-    : item.description;
+  if (titleDate) {
+    return titleDate[1];
+  }
+
+  const publishedAt = new Date(item.pubDate);
+  if (Number.isNaN(publishedAt.getTime())) {
+    return item.pubDate;
+  }
+
+  return publishedAt.toLocaleDateString("sv-SE", {
+    timeZone: "Asia/Shanghai",
+  });
+}
+
+function splitSentences(text) {
+  return text
+    .split(/(?<=[。！？；])/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => /[。！？；]$/.test(line));
+}
+
+export function formatDescriptionSections(description) {
+  const cleaned = description
+    .replace(/^前往官网查看完整版\s*\(ai\.hubtoday\.app\)\s*/i, "")
+    .replace(/\[剩余内容已省略\][\s\S]*$/i, "")
+    .trim();
+
+  const headings = [
+    "产品与功能更新",
+    "前沿研究",
+    "行业展望与社会影响",
+    "开源TOP项目",
+  ];
+
+  const matches = headings
+    .map((heading) => ({
+      heading,
+      index: cleaned.indexOf(heading),
+    }))
+    .filter((entry) => entry.index >= 0)
+    .sort((left, right) => left.index - right.index);
+
+  if (matches.length === 0) {
+    return splitSentences(cleaned).length > 0
+      ? [{ heading: "今日摘要", lines: splitSentences(cleaned) }]
+      : [];
+  }
+
+  const sections = [];
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const rawBody = cleaned
+      .slice(
+        current.index + current.heading.length,
+        next ? next.index : undefined,
+      )
+      .trim();
+    const lines = splitSentences(rawBody);
+
+    if (lines.length > 0) {
+      sections.push({
+        heading: current.heading,
+        lines,
+      });
+    }
+  }
+
+  return sections;
+}
+
+export function buildDingtalkPayload(item) {
+  const issueDate = extractIssueDate(item);
+  const sections = formatDescriptionSections(item.description);
+  const summaryBlocks = sections.flatMap((section) => [
+    `**${section.heading}：**`,
+    ...section.lines.map((line) => `- ${line}`),
+    "",
+  ]);
 
   const markdown = [
     `## ${REQUIRED_KEYWORD}：${item.title}`,
     "",
-    `> 发布时间：${publishedText}`,
+    `> 日期：${issueDate}`,
     "",
-    `${summary}`,
+    ...summaryBlocks,
     "",
     `[查看今日完整日报](${item.link})`,
   ].join("\n");
