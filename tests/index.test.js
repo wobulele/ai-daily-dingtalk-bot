@@ -5,11 +5,15 @@ import {
   formatDescriptionSections,
   normalizeItem,
   shouldSkipPush,
+  writeState,
 } from "../src/index.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-function runTest(name, fn) {
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     console.log(`PASS ${name}`);
   } catch (error) {
     console.error(`FAIL ${name}`);
@@ -17,7 +21,11 @@ function runTest(name, fn) {
   }
 }
 
-runTest("normalizeItem prefers guid and keeps required fields", () => {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const statePath = path.resolve(__dirname, "..", "data", "state.json");
+
+await runTest("normalizeItem prefers guid and keeps required fields", () => {
   const item = normalizeItem({
     title: "2026-04-22日刊",
     guid: "https://ai.hubtoday.app//2026-04/2026-04-22/",
@@ -32,7 +40,7 @@ runTest("normalizeItem prefers guid and keeps required fields", () => {
   assert.equal(item.description, "摘要内容");
 });
 
-runTest("shouldSkipPush returns true when the latest item was already sent", () => {
+await runTest("shouldSkipPush returns true when the latest item was already sent", () => {
   assert.equal(
     shouldSkipPush(
       { id: "same-guid" },
@@ -42,7 +50,7 @@ runTest("shouldSkipPush returns true when the latest item was already sent", () 
   );
 });
 
-runTest("buildDingtalkPayload contains the required keyword and article details", () => {
+await runTest("buildDingtalkPayload contains the required keyword and article details", () => {
   const payload = buildDingtalkPayload({
     title: "2026-04-22日刊",
     link: "https://ai.hubtoday.app/2026-04/2026-04-22/",
@@ -63,7 +71,7 @@ runTest("buildDingtalkPayload contains the required keyword and article details"
   assert.match(payload.markdown.text, /\[查看今日完整日报\]\(https:\/\/ai\.hubtoday\.app\/2026-04\/2026-04-22\/\)/);
 });
 
-runTest("normalizeItem throws when mandatory fields are missing", () => {
+await runTest("normalizeItem throws when mandatory fields are missing", () => {
   assert.throws(
     () =>
       normalizeItem({
@@ -77,7 +85,7 @@ runTest("normalizeItem throws when mandatory fields are missing", () => {
   );
 });
 
-runTest("formatDescriptionSections removes intro text and drops incomplete fragments", () => {
+await runTest("formatDescriptionSections removes intro text and drops incomplete fragments", () => {
   const sections = formatDescriptionSections(
     "前往官网查看完整版 (ai.hubtoday.app) 产品与功能更新 GPT-Image-2 登顶文生图竞技场并刷新纪录。 谷歌 发布 Gemini 深度研究智能体更新。 前沿研究 研究人员 发布内窥镜 AI 超分可靠性框架。 研究者 利用新技术增强视频生成一致性。 斯坦福",
   );
@@ -98,4 +106,26 @@ runTest("formatDescriptionSections removes intro text and drops incomplete fragm
       ],
     },
   ]);
+});
+
+await runTest("writeState records trigger metadata for debugging", async () => {
+  const original = await fs.readFile(statePath, "utf8");
+
+  process.env.RUN_EVENT_NAME = "schedule";
+  process.env.RUN_EVENT_SCHEDULE = "7,37 1-4 * * *";
+
+  await writeState({
+    id: "https://ai.hubtoday.app/2026-04/2026-04-23/",
+    title: "2026-04-23日刊",
+    link: "https://ai.hubtoday.app/2026-04/2026-04-23/",
+    pubDate: "Thu, 23 Apr 2026 10:22:35 GMT",
+  });
+
+  const saved = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(saved.lastTriggerEvent, "schedule");
+  assert.equal(saved.lastTriggerSchedule, "7,37 1-4 * * *");
+
+  await fs.writeFile(statePath, original, "utf8");
+  delete process.env.RUN_EVENT_NAME;
+  delete process.env.RUN_EVENT_SCHEDULE;
 });

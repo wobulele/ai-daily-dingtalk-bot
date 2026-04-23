@@ -112,6 +112,9 @@ export async function readState() {
 }
 
 export async function writeState(item) {
+  const triggerEvent = process.env.RUN_EVENT_NAME || "local";
+  const triggerSchedule = process.env.RUN_EVENT_SCHEDULE || "";
+
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(
     statePath,
@@ -119,6 +122,8 @@ export async function writeState(item) {
       {
         lastSentId: item.id,
         lastSentAt: new Date().toISOString(),
+        lastTriggerEvent: triggerEvent,
+        lastTriggerSchedule: triggerSchedule,
         title: item.title,
         link: item.link,
         pubDate: item.pubDate,

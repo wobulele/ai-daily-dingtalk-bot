@@ -30,6 +30,8 @@ jobs:
       - name: Push latest AI daily to DingTalk
         env:
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          RUN_EVENT_NAME: ${{ github.event_name }}
+          RUN_EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_push }}" = "true" ]; then
             export FORCE_PUSH=1
