@@ -6,11 +6,15 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
-const statePath = path.join(projectRoot, "data", "state.json");
 
 export const RSS_URL =
   "https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml";
 export const REQUIRED_KEYWORD = "AI资讯日报";
+export const DEFAULT_STATE_PATH = path.join(projectRoot, "data", "state.json");
+
+export function getStatePath() {
+  return process.env.STATE_PATH?.trim() || DEFAULT_STATE_PATH;
+}
 
 export function decodeXml(value) {
   return value
@@ -99,6 +103,8 @@ export async function fetchLatestItem(fetchImpl = fetch) {
 }
 
 export async function readState() {
+  const statePath = getStatePath();
+
   try {
     const raw = await fs.readFile(statePath, "utf8");
     return JSON.parse(raw);
@@ -114,6 +120,7 @@ export async function readState() {
 export async function writeState(item) {
   const triggerEvent = process.env.RUN_EVENT_NAME || "local";
   const triggerSchedule = process.env.RUN_EVENT_SCHEDULE || "";
+  const statePath = getStatePath();
 
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(

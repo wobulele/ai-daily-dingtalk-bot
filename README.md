@@ -1,6 +1,6 @@
 # AI 资讯日报钉钉机器人
 
-每天北京时间 `09:07`、`09:37`、`10:07`、`10:37`、`11:07`、`11:37`、`12:07`、`12:37` 读取 [AI 资讯日报 RSS](https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml)，如果出现新的日报条目，则将 `标题 + 摘要 + 链接` 推送到钉钉群机器人。
+项目会读取 [AI 资讯日报 RSS](https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml)，如果出现新的日报条目，则将 `标题 + 摘要 + 链接` 推送到钉钉群机器人。
 
 ## 机器人配置
 
@@ -30,21 +30,88 @@ $env:FORCE_PUSH="1"
 npm start
 ```
 
+## Debian 13 部署
+
+### 1. 安装依赖
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
+```
+
+安装 Node.js `20+`，只要满足“原生支持 `fetch`”即可。
+
+### 2. 拉取代码
+
+```bash
+cd /opt
+sudo git clone https://github.com/wobulele/ai-daily-dingtalk-bot.git
+sudo chown -R "$USER":"$USER" /opt/ai-daily-dingtalk-bot
+cd /opt/ai-daily-dingtalk-bot
+```
+
+### 3. 配置服务器环境变量
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+编辑 `.env`：
+
+- `DINGTALK_WEBHOOK` 填你的钉钉机器人地址
+- `STATE_PATH` 建议保持为 `.runtime/state.json`
+
+### 4. 先手动跑通一次
+
+```bash
+chmod +x scripts/run-on-server.sh
+./scripts/run-on-server.sh
+```
+
+如果钉钉能收到消息，说明服务器网络、Webhook、Node.js 和脚本都正常。
+
+### 5. 再开启 cron
+
+推荐每 10 分钟检查一次，时间窗口设为北京时间 `10:00-12:59`。项目有去重逻辑，因此一天内即使检查多次，也只会成功发送一次。
+
+编辑 `crontab`：
+
+```bash
+crontab -e
+```
+
+加入：
+
+```cron
+CRON_TZ=Asia/Shanghai
+*/10 10-12 * * * cd /opt/ai-daily-dingtalk-bot && /bin/bash ./scripts/run-on-server.sh >> /var/log/ai-daily-dingtalk-bot.log 2>&1
+```
+
+查看日志：
+
+```bash
+tail -f /var/log/ai-daily-dingtalk-bot.log
+```
+
 ## GitHub Actions
 
-- 定时：每天北京时间 `09:07`、`09:37`、`10:07`、`10:37`、`11:07`、`11:37`、`12:07`、`12:37`
-- 换算成 UTC cron：`7,37 1-4 * * *`
-- 也支持手动 `workflow_dispatch`
+- 当前只保留手动 `workflow_dispatch`
+- 目的：作为应急测试入口，不再承担生产环境的自动调度
+- 迁移到 Debian `cron` 后，不要再恢复 GitHub 的 `schedule`，否则会和服务器重复推送
 
-由于项目会在 `data/state.json` 中记录最近一次成功推送的日报 `guid/link`，因此即使一天内检查 8 次，也只会在发现当天新日报的第一次发送成功时推送一次，后续同一天检查会自动跳过。
+如果需要在 GitHub 网页里重复演示今天的推送，继续使用 `workflow_dispatch + force_push` 即可。
 
 ## 状态文件
 
-项目会在 `data/state.json` 中记录最近一次成功推送的日报 `guid/link`，用于避免重复发送。该文件由 GitHub Actions 在成功推送后自动提交回仓库。
+- 默认状态文件：`data/state.json`
+- Debian 服务器建议通过 `.env` 把 `STATE_PATH` 设为 `.runtime/state.json`
+- 这样服务器上的去重状态不会污染 Git 工作区，也不会和 GitHub 手动测试互相干扰
 
 ## 排障
 
-- 查看 GitHub Actions 运行日志确认 RSS 拉取、解析和钉钉返回值
+- 先手动执行 `./scripts/run-on-server.sh`，确认 RSS 拉取、解析和钉钉返回值
+- 再查看 `tail -f /var/log/ai-daily-dingtalk-bot.log`
 - 若钉钉不发消息，优先确认：
   - Webhook 是否正确
   - 机器人是否仍然启用

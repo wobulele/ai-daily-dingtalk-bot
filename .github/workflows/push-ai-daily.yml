@@ -1,8 +1,6 @@
 name: Push AI Daily To DingTalk
 
 on:
-  schedule:
-    - cron: "7,37 1-4 * * *"
   workflow_dispatch:
     inputs:
       force_push:

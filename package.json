@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Push the latest AI Insight Daily entry to DingTalk via GitHub Actions.",
+  "description": "Push the latest AI Insight Daily entry to DingTalk via cron or manual GitHub workflow.",
   "scripts": {
     "test": "node tests/index.test.js",
     "start": "node src/index.js"

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_STATE_PATH,
   buildDingtalkPayload,
   formatDescriptionSections,
+  getStatePath,
   normalizeItem,
   shouldSkipPush,
   writeState,
@@ -23,7 +25,7 @@ async function runTest(name, fn) {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const statePath = path.resolve(__dirname, "..", "data", "state.json");
+const statePath = DEFAULT_STATE_PATH;
 
 await runTest("normalizeItem prefers guid and keeps required fields", () => {
   const item = normalizeItem({
@@ -128,4 +130,25 @@ await runTest("writeState records trigger metadata for debugging", async () => {
   await fs.writeFile(statePath, original, "utf8");
   delete process.env.RUN_EVENT_NAME;
   delete process.env.RUN_EVENT_SCHEDULE;
+});
+
+await runTest("getStatePath uses STATE_PATH when provided", async () => {
+  const customStatePath = path.resolve(__dirname, "tmp-state.json");
+
+  process.env.STATE_PATH = customStatePath;
+
+  assert.equal(getStatePath(), customStatePath);
+
+  await writeState({
+    id: "https://ai.hubtoday.app/2026-04/2026-04-24/",
+    title: "2026-04-24日刊",
+    link: "https://ai.hubtoday.app/2026-04/2026-04-24/",
+    pubDate: "Fri, 24 Apr 2026 10:00:00 GMT",
+  });
+
+  const saved = JSON.parse(await fs.readFile(customStatePath, "utf8"));
+  assert.equal(saved.lastSentId, "https://ai.hubtoday.app/2026-04/2026-04-24/");
+
+  await fs.rm(customStatePath, { force: true });
+  delete process.env.STATE_PATH;
 });

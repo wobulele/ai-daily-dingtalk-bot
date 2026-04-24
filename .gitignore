@@ -1,1 +1,4 @@
 实施.txt
+.env
+.runtime/
+*.log
