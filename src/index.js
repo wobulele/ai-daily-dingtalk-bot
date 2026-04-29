@@ -56,6 +56,13 @@ function extractTag(xml, tagName) {
   return match ? match[1].trim() : "";
 }
 
+export function extractContentEncoded(itemXml) {
+  const match = itemXml.match(
+    /<content:encoded[^>]*>([\s\S]*?)<\/content:encoded>/i,
+  );
+  return match ? match[1].trim() : "";
+}
+
 export function parseLatestItem(xml) {
   const itemMatch = xml.match(/<item>([\s\S]*?)<\/item>/i);
 
@@ -68,6 +75,7 @@ export function parseLatestItem(xml) {
     guid: stripHtml(extractTag(itemMatch[1], "guid")),
     link: stripHtml(extractTag(itemMatch[1], "link")),
     description: stripHtml(extractTag(itemMatch[1], "description")),
+    contentEncoded: extractContentEncoded(itemMatch[1]),
     pubDate: stripHtml(extractTag(itemMatch[1], "pubDate")),
   };
 }
@@ -83,7 +91,8 @@ export function normalizeItem(item) {
     throw new Error("RSS item is missing required fields.");
   }
 
-  return { id, title, link, description, pubDate };
+  const contentEncoded = item.contentEncoded || "";
+  return { id, title, link, description, contentEncoded, pubDate };
 }
 
 export async function fetchLatestItem(fetchImpl = fetch) {
@@ -164,14 +173,95 @@ export function extractIssueDate(item) {
 }
 
 function splitSentences(text) {
-  return text
+  // 优先按中文句号等标点分割
+  const byPunctuation = text
     .split(/(?<=[。！？；])/)
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => /[。！？；]$/.test(line));
+
+  if (byPunctuation.length > 0) {
+    return byPunctuation;
+  }
+
+  // RSS 源可能不带句号（摘要模式），改用序号分割
+  const byNumbering = text
+    .split(/(?=\d+[.、．]\s*)/)
+    .map((line) => line.replace(/^\d+[.、．]\s*/, "").trim())
+    .filter(Boolean);
+
+  return byNumbering;
 }
 
-export function formatDescriptionSections(description) {
+function extractListItemsFromHtml(html) {
+  const decoded = decodeXml(html)
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+
+  const items = [...decoded.matchAll(/<li[^>]*>(.*?)<\/li>/gi)]
+    .map((m) => m[1].replace(/<[^>]+>/g, "").trim())
+    .filter(Boolean);
+
+  return items;
+}
+
+function parseSectionsFromHtml(html) {
+  const decoded = decodeXml(html)
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+
+  const headings = [
+    "产品与功能更新",
+    "前沿研究",
+    "行业展望与社会影响",
+    "开源TOP项目",
+  ];
+
+  // 先找标题位置（h3 标签或纯文本中）
+  const matches = headings
+    .map((heading) => ({
+      heading,
+      index: decoded.indexOf(heading),
+    }))
+    .filter((entry) => entry.index >= 0)
+    .sort((left, right) => left.index - right.index);
+
+  if (matches.length === 0) {
+    return [];
+  }
+
+  const sections = [];
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const sectionHtml = decoded.slice(
+      current.index + current.heading.length,
+      next ? next.index : undefined,
+    );
+
+    // 从 <li> 标签提取条目
+    const lines = extractListItemsFromHtml(sectionHtml);
+
+    if (lines.length > 0) {
+      sections.push({
+        heading: current.heading,
+        lines,
+      });
+    }
+  }
+
+  return sections;
+}
+
+export function formatDescriptionSections(description, contentEncoded) {
+  // 优先从 content:encoded（HTML）提取，结构更完整
+  if (contentEncoded) {
+    const htmlSections = parseSectionsFromHtml(contentEncoded);
+    if (htmlSections.length > 0) {
+      return htmlSections;
+    }
+  }
+
+  // Fallback：从纯文本 description 提取
   const cleaned = description
     .replace(/^前往官网查看完整版\s*\(ai\.hubtoday\.app\)\s*/i, "")
     .replace(/\[剩余内容已省略\][\s\S]*$/i, "")
@@ -224,7 +314,7 @@ export function formatDescriptionSections(description) {
 
 export function buildDingtalkPayload(item) {
   const issueDate = extractIssueDate(item);
-  const sections = formatDescriptionSections(item.description);
+  const sections = formatDescriptionSections(item.description, item.contentEncoded);
   const summaryBlocks = sections.flatMap((section) => [
     `**${section.heading}：**`,
     ...section.lines.map((line) => `- ${line}`),
