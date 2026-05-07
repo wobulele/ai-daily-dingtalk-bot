@@ -47,6 +47,39 @@ export function normalizeUrl(value) {
   }
 }
 
+export function normalizeDailyArticleLink(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) {
+    return normalized;
+  }
+
+  try {
+    const url = new URL(normalized);
+    const supportedHosts = new Set(["ai.hubtoday.app", "hex2077.dev"]);
+
+    if (!supportedHosts.has(url.hostname)) {
+      return normalized;
+    }
+
+    if (/^\/docs\/\d{4}-\d{2}\/\d{4}-\d{2}-\d{2}\/?$/.test(url.pathname)) {
+      return url.toString();
+    }
+
+    const match = url.pathname.match(
+      /^\/(\d{4}-\d{2})\/(\d{4}-\d{2}-\d{2})\/?$/,
+    );
+
+    if (!match) {
+      return normalized;
+    }
+
+    url.pathname = `/docs/${match[1]}/${match[2]}/`;
+    return url.toString();
+  } catch {
+    return normalized;
+  }
+}
+
 function extractTag(xml, tagName) {
   const pattern = new RegExp(
     `<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
@@ -83,7 +116,7 @@ export function parseLatestItem(xml) {
 export function normalizeItem(item) {
   const title = item.title?.trim();
   const id = normalizeUrl(item.guid?.trim() || item.link?.trim());
-  const link = normalizeUrl(item.link?.trim());
+  const link = normalizeDailyArticleLink(item.link?.trim());
   const description = item.description?.trim();
   const pubDate = item.pubDate?.trim();
 
