@@ -29,17 +29,42 @@ const statePath = DEFAULT_STATE_PATH;
 
 await runTest("normalizeItem prefers guid and keeps required fields", () => {
   const item = normalizeItem({
-    title: "2026-04-22日刊",
-    guid: "https://ai.hubtoday.app//2026-04/2026-04-22/",
-    link: "https://ai.hubtoday.app//2026-04/2026-04-22/",
+    title: "2026-05-07日刊",
+    guid: "https://ai.hubtoday.app//2026-05/2026-05-07/",
+    link: "https://ai.hubtoday.app//2026-05/2026-05-07/",
     description: "摘要内容",
-    pubDate: "Wed, 22 Apr 2026 09:44:53 GMT",
+    pubDate: "Thu, 07 May 2026 10:50:22 GMT",
   });
 
-  assert.equal(item.id, "https://ai.hubtoday.app/2026-04/2026-04-22/");
-  assert.equal(item.link, "https://ai.hubtoday.app/2026-04/2026-04-22/");
-  assert.equal(item.title, "2026-04-22日刊");
+  assert.equal(item.id, "https://ai.hubtoday.app/2026-05/2026-05-07/");
+  assert.equal(item.link, "https://ai.hubtoday.app/docs/2026-05/2026-05-07/");
+  assert.equal(item.title, "2026-05-07日刊");
   assert.equal(item.description, "摘要内容");
+});
+
+await runTest("normalizeItem does not duplicate docs in daily article links", () => {
+  const item = normalizeItem({
+    title: "2026-05-07日刊",
+    guid: "https://ai.hubtoday.app/docs/2026-05/2026-05-07/",
+    link: "https://ai.hubtoday.app/docs/2026-05/2026-05-07/",
+    description: "摘要内容",
+    pubDate: "Thu, 07 May 2026 10:50:22 GMT",
+  });
+
+  assert.equal(item.link, "https://ai.hubtoday.app/docs/2026-05/2026-05-07/");
+});
+
+await runTest("normalizeItem does not rewrite unrelated article hosts", () => {
+  const item = normalizeItem({
+    title: "2026-05-07日刊",
+    guid: "https://example.com//2026-05/2026-05-07/",
+    link: "https://example.com//2026-05/2026-05-07/",
+    description: "摘要内容",
+    pubDate: "Thu, 07 May 2026 10:50:22 GMT",
+  });
+
+  assert.equal(item.id, "https://example.com/2026-05/2026-05-07/");
+  assert.equal(item.link, "https://example.com/2026-05/2026-05-07/");
 });
 
 await runTest("shouldSkipPush returns true when the latest item was already sent", () => {
@@ -55,7 +80,7 @@ await runTest("shouldSkipPush returns true when the latest item was already sent
 await runTest("buildDingtalkPayload contains the required keyword and article details", () => {
   const payload = buildDingtalkPayload({
     title: "2026-04-22日刊",
-    link: "https://ai.hubtoday.app/2026-04/2026-04-22/",
+    link: "https://ai.hubtoday.app/docs/2026-04/2026-04-22/",
     description:
       "前往官网查看完整版 (ai.hubtoday.app) 产品与功能更新 GPT-Image-2 登顶文生图竞技场并刷新纪录。 谷歌 发布 Gemini 深度研究智能体更新。 前沿研究 研究人员 发布内窥镜 AI 超分可靠性框架。 研究者 利用新技术增强视频生成一致性。 斯坦福",
     pubDate: "Wed, 22 Apr 2026 09:44:53 GMT",
@@ -70,7 +95,7 @@ await runTest("buildDingtalkPayload contains the required keyword and article de
   assert.doesNotMatch(payload.markdown.text, /前往官网查看完整版/);
   assert.match(payload.markdown.text, /\*\*产品与功能更新：\*\*/);
   assert.match(payload.markdown.text, /- GPT-Image-2 登顶文生图竞技场并刷新纪录。/);
-  assert.match(payload.markdown.text, /\[查看今日完整日报\]\(https:\/\/ai\.hubtoday\.app\/2026-04\/2026-04-22\/\)/);
+  assert.match(payload.markdown.text, /\[查看今日完整日报\]\(https:\/\/ai\.hubtoday\.app\/docs\/2026-04\/2026-04-22\/\)/);
 });
 
 await runTest("normalizeItem throws when mandatory fields are missing", () => {
