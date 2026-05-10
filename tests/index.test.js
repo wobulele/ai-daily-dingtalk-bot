@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_STATE_PATH,
   buildDingtalkPayload,
+  fetchLatestItem,
   formatDescriptionSections,
   getStatePath,
   normalizeItem,
@@ -65,6 +66,61 @@ await runTest("normalizeItem does not rewrite unrelated article hosts", () => {
 
   assert.equal(item.id, "https://example.com/2026-05/2026-05-07/");
   assert.equal(item.link, "https://example.com/2026-05/2026-05-07/");
+});
+
+await runTest("fetchLatestItem falls back to the daily page when RSS is gone", async () => {
+  const requests = [];
+  const dailyHtml = `
+    <html>
+      <head>
+        <title>AI资讯日报 2026/5/10</title>
+        <meta name="description" content="GPT 5.5 Pro突破博士级数学难题震惊学界，蚂蚁发布万亿模型并计划开源" />
+      </head>
+      <body>
+        <h3 id="产品与功能更新"><span>产品与功能更新</span></h3>
+        <ol>
+          <li><p><strong>ChatGPT 5.5 Pro 攻克数学博士难题。</strong> 菲尔兹奖得主进行测评。</p></li>
+        </ol>
+        <h3 id="前沿研究"><span>前沿研究</span></h3>
+        <ol>
+          <li><p><strong>PCNET 算法检测幻觉异常点。</strong> 研究团队提高了检测效率。</p></li>
+        </ol>
+      </body>
+    </html>
+  `;
+  const fetchImpl = async (url) => {
+    requests.push(url);
+
+    if (url === "https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml") {
+      return {
+        ok: false,
+        status: 404,
+        text: async () => "",
+      };
+    }
+
+    if (url === "https://hex2077.dev/docs/2026-05/2026-05-10/") {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => dailyHtml,
+      };
+    }
+
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  const item = await fetchLatestItem(fetchImpl, new Date("2026-05-10T02:30:00.000Z"));
+
+  assert.deepEqual(requests, [
+    "https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml",
+    "https://hex2077.dev/docs/2026-05/2026-05-10/",
+  ]);
+  assert.equal(item.id, "https://ai.hubtoday.app/docs/2026-05/2026-05-10/");
+  assert.equal(item.title, "2026-05-10日刊");
+  assert.equal(item.link, "https://ai.hubtoday.app/docs/2026-05/2026-05-10/");
+  assert.match(item.description, /GPT 5\.5 Pro/);
+  assert.match(item.contentEncoded, /产品与功能更新/);
 });
 
 await runTest("shouldSkipPush returns true when the latest item was already sent", () => {
@@ -131,6 +187,51 @@ await runTest("formatDescriptionSections removes intro text and drops incomplete
         "研究人员 发布内窥镜 AI 超分可靠性框架。",
         "研究者 利用新技术增强视频生成一致性。",
       ],
+    },
+  ]);
+});
+
+await runTest("formatDescriptionSections extracts multiline daily page list items", () => {
+  const sections = formatDescriptionSections(
+    "",
+    `
+      <h3 id="产品与功能更新"><span>产品与功能更新</span></h3>
+      <ol>
+        <li>
+          <p><strong>ChatGPT 5.5 Pro 攻克数学博士难题。</strong> 菲尔兹奖得主进行测评。</p>
+        </li>
+      </ol>
+      <h3 id="前沿研究"><span>前沿研究</span></h3>
+      <ol>
+        <li>
+          <p><strong>PCNET 算法检测幻觉异常点。</strong> 研究团队提高了检测效率。</p>
+        </li>
+      </ol>
+      <h3 id="开源TOP项目"><span>开源TOP项目</span></h3>
+      <ol>
+        <li>
+          <p><strong>谷歌发布 Chrome-DevTools-MCP。</strong> 自动调试浏览器。</p>
+        </li>
+      </ol>
+      <h2>社媒分享</h2>
+      <ul>
+        <li>页脚导航不应进入日报摘要</li>
+      </ul>
+    `,
+  );
+
+  assert.deepEqual(sections, [
+    {
+      heading: "产品与功能更新",
+      lines: ["ChatGPT 5.5 Pro 攻克数学博士难题。 菲尔兹奖得主进行测评。"],
+    },
+    {
+      heading: "前沿研究",
+      lines: ["PCNET 算法检测幻觉异常点。 研究团队提高了检测效率。"],
+    },
+    {
+      heading: "开源TOP项目",
+      lines: ["谷歌发布 Chrome-DevTools-MCP。 自动调试浏览器。"],
     },
   ]);
 });

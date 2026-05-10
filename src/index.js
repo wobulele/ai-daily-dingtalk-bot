@@ -11,6 +11,8 @@ export const RSS_URL =
   "https://justlovemaki.github.io/CloudFlare-AI-Insight-Daily/rss.xml";
 export const REQUIRED_KEYWORD = "AI资讯日报";
 export const DEFAULT_STATE_PATH = path.join(projectRoot, "data", "state.json");
+export const DAILY_PAGE_ORIGIN = "https://hex2077.dev";
+export const PUBLIC_DAILY_ORIGIN = "https://ai.hubtoday.app";
 
 export function getStatePath() {
   return process.env.STATE_PATH?.trim() || DEFAULT_STATE_PATH;
@@ -80,6 +82,20 @@ export function normalizeDailyArticleLink(value) {
   }
 }
 
+export function getShanghaiIssueDate(now = new Date()) {
+  return now.toLocaleDateString("sv-SE", {
+    timeZone: "Asia/Shanghai",
+  });
+}
+
+export function buildDailyArticlePath(issueDate) {
+  return `/docs/${issueDate.slice(0, 7)}/${issueDate}/`;
+}
+
+export function buildDailyArticleUrl(issueDate, origin = PUBLIC_DAILY_ORIGIN) {
+  return new URL(buildDailyArticlePath(issueDate), origin).toString();
+}
+
 function extractTag(xml, tagName) {
   const pattern = new RegExp(
     `<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
@@ -87,6 +103,24 @@ function extractTag(xml, tagName) {
   );
   const match = xml.match(pattern);
   return match ? match[1].trim() : "";
+}
+
+function extractHtmlAttribute(tag, attributeName) {
+  const pattern = new RegExp(`${attributeName}\\s*=\\s*(['"])(.*?)\\1`, "i");
+  const match = tag.match(pattern);
+  return match ? decodeXml(match[2]).trim() : "";
+}
+
+function extractMetaContent(html, metaName) {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) || [];
+
+  for (const tag of metaTags) {
+    if (extractHtmlAttribute(tag, "name").toLowerCase() === metaName) {
+      return extractHtmlAttribute(tag, "content");
+    }
+  }
+
+  return "";
 }
 
 export function extractContentEncoded(itemXml) {
@@ -128,7 +162,41 @@ export function normalizeItem(item) {
   return { id, title, link, description, contentEncoded, pubDate };
 }
 
-export async function fetchLatestItem(fetchImpl = fetch) {
+export function parseDailyPage(html, issueDate) {
+  const link = buildDailyArticleUrl(issueDate);
+  const description =
+    extractMetaContent(html, "description") || stripHtml(html).slice(0, 240);
+  const pubDate = new Date(`${issueDate}T00:00:00+08:00`).toUTCString();
+
+  return normalizeItem({
+    title: `${issueDate}日刊`,
+    guid: link,
+    link,
+    description,
+    contentEncoded: html,
+    pubDate,
+  });
+}
+
+export async function fetchDailyPageItem(fetchImpl = fetch, now = new Date()) {
+  const issueDate = getShanghaiIssueDate(now);
+  const pageUrl = buildDailyArticleUrl(issueDate, DAILY_PAGE_ORIGIN);
+  const response = await fetchImpl(pageUrl, {
+    headers: {
+      "user-agent": "ai-daily-dingtalk-bot/1.0",
+      accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch daily page: HTTP ${response.status}`);
+  }
+
+  const html = await response.text();
+  return parseDailyPage(html, issueDate);
+}
+
+export async function fetchLatestItem(fetchImpl = fetch, now = new Date()) {
   const response = await fetchImpl(RSS_URL, {
     headers: {
       "user-agent": "ai-daily-dingtalk-bot/1.0",
@@ -137,7 +205,7 @@ export async function fetchLatestItem(fetchImpl = fetch) {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch RSS feed: HTTP ${response.status}`);
+    return fetchDailyPageItem(fetchImpl, now);
   }
 
   const xml = await response.text();
@@ -230,8 +298,8 @@ function extractListItemsFromHtml(html) {
   const decoded = decodeXml(html)
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
 
-  const items = [...decoded.matchAll(/<li[^>]*>(.*?)<\/li>/gi)]
-    .map((m) => m[1].replace(/<[^>]+>/g, "").trim())
+  const items = [...decoded.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+    .map((m) => m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
   return items;
@@ -247,9 +315,10 @@ function parseSectionsFromHtml(html) {
     "行业展望与社会影响",
     "开源TOP项目",
   ];
+  const boundaryHeadings = ["社媒分享", "AI资讯日报多渠道", "回到顶部"];
 
-  // 先找标题位置（h3 标签或纯文本中）
-  const matches = headings
+  // 先找标题位置（h3 标签或纯文本中），同时识别正文后的边界标题
+  const matches = [...headings, ...boundaryHeadings]
     .map((heading) => ({
       heading,
       index: decoded.indexOf(heading),
@@ -274,7 +343,7 @@ function parseSectionsFromHtml(html) {
     // 从 <li> 标签提取条目
     const lines = extractListItemsFromHtml(sectionHtml);
 
-    if (lines.length > 0) {
+    if (headings.includes(current.heading) && lines.length > 0) {
       sections.push({
         heading: current.heading,
         lines,
